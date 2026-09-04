@@ -1,0 +1,27 @@
+@import "tailwindcss";
+
+:root {
+  --background: var(--color-slate-950);
+  --foreground: var(--color-slate-50);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+/* SwipeFi is dark-mode only: no prefers-color-scheme override. */
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+}
+
+@utility glass-panel {
+  background-color: color-mix(in srgb, var(--color-slate-900) 60%, transparent);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid color-mix(in srgb, var(--color-slate-50) 10%, transparent);
+}
