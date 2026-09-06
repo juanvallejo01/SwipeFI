@@ -22,6 +22,14 @@
       "@/*": ["./*"]
     }
   },
+  "ts-node": {
+    "transpileOnly": true,
+    "compilerOptions": {
+      "module": "CommonJS",
+      "moduleResolution": "node",
+      "verbatimModuleSyntax": false
+    }
+  },
   "include": [
     "next-env.d.ts",
     "**/*.ts",
