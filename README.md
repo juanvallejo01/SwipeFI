@@ -34,3 +34,7 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+
+> **Note:** The initial commits were made using my Mac's local Git identity, so they were not correctly associated with my GitHub profile. Git is now configured with my GitHub identity, and all new contributions will be correctly linked to my profile.
+<img width="1370" height="778" alt="image" src="https://github.com/user-attachments/assets/af5252db-541d-4e5a-82a0-20c2d91c37aa" />
+
