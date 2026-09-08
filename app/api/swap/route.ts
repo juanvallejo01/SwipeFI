@@ -1,15 +1,23 @@
 /**
- * POST /api/swap — compile 1inch Aqua SwapVM execution calldata.
+ * POST /api/swap — compile the atomic "Zap & Yield" SwapVM calldata.
+ *
+ * The route compiles a single transaction that:
+ *   1. Swaps the input USDC to ETH through 1inch Aqua liquidity, then
+ *   2. Deposits that ETH straight into Lido Liquid Staking (`submit`) for stETH,
+ *   3. packed into one atomic SwapVM batch (`executeAtomic`).
  *
  * Body (JSON):
  *   { fromToken, toToken, amount, walletAddress }
  *     - fromToken     ERC-20 source address (e.g. USDC 0xA0b8...eB48)
- *     - toToken       target token address (ERC-20, or 0xEeee.../0x0 for native ETH)
+ *     - toToken       swap target token (ERC-20, or 0xEeee.../0x0 for native ETH) —
+ *                     the ETH leg that gets staked into Lido
  *     - amount        source amount in atomic units, as a decimal string
  *     - walletAddress the user's address (used as `from` for gas estimation)
  *
  * Success (200):
  *   { success: true, to, data, value, estimatedGas, meta, warnings }
+ *     meta includes yield fields: expectedOut, yieldToken ("stETH"),
+ *     targetProtocol ("Lido Staking"), estimatedApy.
  *
  * Errors:
  *   400 — malformed JSON or invalid field         { success: false, error, field? }
@@ -19,6 +27,7 @@
 import { NextResponse } from "next/server";
 import {
   compileAquaSwap,
+  DEFAULT_LIDO_APY,
   estimateGas,
   fetchOneInchQuote,
   parseSwapRequest,
@@ -71,10 +80,11 @@ export async function POST(request: Request) {
     throw err;
   }
 
-  // 4. Compile the SwapVM execution calldata, then enrich it best-effort.
+  // 4. Compile the atomic Zap & Yield calldata, then enrich it best-effort.
   try {
-    const compiled = compileAquaSwap(swapRequest, env);
+    const compiled = compileAquaSwap(swapRequest, env, { yieldStrategy: "lido-steth" });
     const warnings: string[] = [];
+    const estimatedApy = process.env.LIDO_APY_ESTIMATE?.trim() || DEFAULT_LIDO_APY;
 
     const [gas, quoteResult] = await Promise.all([
       estimateGas(env, {
@@ -104,6 +114,9 @@ export async function POST(request: Request) {
           ...compiled.meta,
           gasSource: gas.source,
           expectedOut: quoteResult.quote?.dstAmount ?? null,
+          yieldToken: compiled.meta.yield?.yieldToken ?? "stETH",
+          targetProtocol: compiled.meta.yield?.targetProtocol ?? "Lido Staking",
+          estimatedApy,
         },
         warnings,
       },
@@ -122,8 +135,9 @@ export async function POST(request: Request) {
 /** Lightweight usage descriptor — handy for a quick `curl` sanity check. */
 export function GET() {
   return NextResponse.json({
-    name: "SwipeFi · 1inch Aqua SwapVM compiler",
+    name: "SwipeFi · Zap & Yield (1inch Aqua swap + Lido staking) compiler",
     method: "POST",
+    flow: ["aqua-swap: USDC -> ETH", "lido-submit: ETH -> stETH", "executeAtomic: one transaction"],
     exampleBody: {
       fromToken: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
       toToken: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",

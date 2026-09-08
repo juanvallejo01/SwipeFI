@@ -1,5 +1,11 @@
 /**
- * SwipeFi — verification harness for the 1inch Aqua SwapVM compiler.
+ * SwipeFi — verification harness for the atomic "Zap & Yield" SwapVM compiler.
+ *
+ * Verifies that:
+ *   1. Calldata compiles without errors for the atomic Zap & Yield flow
+ *      (1inch Aqua swap + Lido `submit`).
+ *   2. The compiled execution data incorporates BOTH the Aqua strategy execution
+ *      and the Lido contract target (0xae7ab96520DE3A18E5e111B5EaAb095312D7fE84).
  *
  * Two modes:
  *   1. Direct (default): calls `parseSwapRequest` + `compileAquaSwap` in-process
@@ -13,8 +19,10 @@
  */
 
 import "dotenv/config";
+import { getAddress } from "viem";
 import {
   compileAquaSwap,
+  LIDO_STETH_ADDRESS,
   parseSwapRequest,
   resolveSwapEnv,
   SwapInputError,
@@ -30,6 +38,9 @@ const USDC = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
 const WETH = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
 const WALLET = "0x28C6c06298d514Db089934071355E5743bf21d60";
 const ROUTE_URL = process.env.SWAP_ROUTE_URL || "http://localhost:3000/api/swap";
+
+/** Lido stETH target, lower-cased and 0x-stripped — how it appears inside calldata. */
+const LIDO_IN_CALLDATA = LIDO_STETH_ADDRESS.slice(2).toLowerCase();
 
 let passed = 0;
 let failed = 0;
@@ -83,6 +94,60 @@ function runDirectTests(): void {
     );
     assert(out.meta.wrapsNative === true, "wrapsNative should be true for native target");
     assert(HEX.test(out.data) && out.data.length > 10, "calldata missing for wrapped native swap");
+  });
+
+  check("compiles the atomic Zap & Yield (swap + Lido submit) calldata without throwing", () => {
+    const out = compileAquaSwap(parseSwapRequest(base), env, { yieldStrategy: "lido-steth" });
+
+    assert(ADDRESS.test(out.to), `to is not an address: ${out.to}`);
+    assert(HEX.test(out.data) && out.data.length > 10, `data is not calldata: ${out.data}`);
+    assert(out.value === "0", `value should be "0", got ${out.value}`);
+    assert(/^\d+$/.test(out.estimatedGas), `estimatedGas not numeric: ${out.estimatedGas}`);
+
+    // Yield metadata for the UI.
+    assert(out.meta.yield !== null, "meta.yield must be populated for the Zap & Yield flow");
+    assert(out.meta.yield!.yieldToken === "stETH", `yieldToken should be stETH: ${out.meta.yield!.yieldToken}`);
+    assert(
+      out.meta.yield!.targetProtocol === "Lido Staking",
+      `targetProtocol should be "Lido Staking": ${out.meta.yield!.targetProtocol}`,
+    );
+    assert(
+      getAddress(out.meta.yield!.lidoContract) === getAddress(LIDO_STETH_ADDRESS),
+      `lidoContract should be the mainnet stETH address: ${out.meta.yield!.lidoContract}`,
+    );
+    assert(HEX.test(out.meta.yield!.submitCalldata), "submit calldata malformed");
+  });
+
+  check("atomic calldata incorporates BOTH the Aqua swap and the Lido contract target", () => {
+    const plain = compileAquaSwap(parseSwapRequest(base), env);
+    const zap = compileAquaSwap(parseSwapRequest(base), env, { yieldStrategy: "lido-steth" });
+    const zapData = zap.data.toLowerCase();
+
+    // Leg 1: the exact Aqua swap calldata is embedded verbatim in the batch.
+    assert(
+      zapData.includes(zap.meta.swapCalldata.slice(2).toLowerCase()),
+      "atomic calldata does not embed the Aqua swap execution",
+    );
+    // Leg 2: the Lido stETH target address (0xae7a...fE84) appears in the batch.
+    assert(
+      zapData.includes(LIDO_IN_CALLDATA),
+      `atomic calldata does not reference the Lido target ${LIDO_STETH_ADDRESS}`,
+    );
+    // Leg 2: the encoded Lido submit(referral) calldata is embedded verbatim.
+    assert(
+      zapData.includes(zap.meta.yield!.submitCalldata.slice(2).toLowerCase()),
+      "atomic calldata does not embed the Lido submit() call",
+    );
+    // Wrapping actually happened: the batch differs from the bare swap.
+    assert(zap.data !== plain.data, "Zap & Yield calldata must differ from the plain swap calldata");
+    // Steps are ordered swap -> stake.
+    assert(zap.meta.yield!.steps.length === 2, "expected exactly two atomic steps");
+    assert(zap.meta.yield!.steps[0].kind === "aqua-swap", "step 0 should be the Aqua swap");
+    assert(zap.meta.yield!.steps[1].kind === "lido-submit", "step 1 should be the Lido submit");
+    assert(
+      getAddress(zap.meta.yield!.steps[1].target) === getAddress(LIDO_STETH_ADDRESS),
+      "step 1 target should be the Lido stETH contract",
+    );
   });
 
   check("rejects an invalid walletAddress (400-class)", () => {
@@ -151,12 +216,22 @@ async function runHttpTests(): Promise<void> {
     });
     const json = (await res.json()) as Record<string, unknown>;
 
-    check("POST valid payload -> 200 + success calldata", () => {
+    check("POST valid payload -> 200 + atomic Zap & Yield calldata", () => {
       assert(res.status === 200, `status ${res.status}: ${JSON.stringify(json)}`);
       assert(json.success === true, `success !== true: ${JSON.stringify(json)}`);
       assert(typeof json.data === "string" && HEX.test(json.data as string), "data missing/invalid");
       assert(ADDRESS.test(json.to as string), "to missing/invalid");
       assert(json.value === "0", "value should be 0");
+      assert(
+        (json.data as string).toLowerCase().includes(LIDO_IN_CALLDATA),
+        "response calldata does not reference the Lido target",
+      );
+
+      const meta = json.meta as Record<string, unknown>;
+      assert(meta?.yieldToken === "stETH", `meta.yieldToken should be stETH: ${JSON.stringify(meta)}`);
+      assert(meta?.targetProtocol === "Lido Staking", "meta.targetProtocol should be \"Lido Staking\"");
+      assert(typeof meta?.estimatedApy === "string", "meta.estimatedApy missing");
+      assert("expectedOut" in meta, "meta.expectedOut missing");
     });
 
     const badRes = await post({ fromToken: "0xbad", toToken: WETH, amount: "1", walletAddress: WALLET });

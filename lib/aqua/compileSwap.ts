@@ -27,6 +27,23 @@ export const CHAIN_ID: number = NetworkEnum.ETHEREUM; // 1
 export const MAINNET_USDC = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
 export const MAINNET_WETH = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
 
+/**
+ * Mainnet Lido Liquid Staking (stETH) contract. `submit(address referral)` is
+ * payable: it takes the ETH sent with the call and mints the caller stETH 1:1.
+ * This is Step 2 of the "Zap & Yield" flow — the ETH that Aqua produces in
+ * Step 1 is deposited straight into Lido inside the same transaction.
+ */
+export const LIDO_STETH_ADDRESS = "0xae7ab96520DE3A18E5e111B5EaAb095312D7fE84";
+
+/** All-zero address — the default Lido referral and native-token sentinel. */
+export const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+
+/** Headline Lido staking APR surfaced to the UI; override with `LIDO_APY_ESTIMATE`. */
+export const DEFAULT_LIDO_APY = "3.4%";
+
+/** Gas budget for the atomic swap + Lido `submit` batch when no estimate is available. */
+export const DEFAULT_ZAP_GAS_LIMIT = "420000";
+
 /** Sentinels the 1inch APIs use for "native ETH". Routed through WETH inside Aqua. */
 const NATIVE_TOKEN_ALIASES = new Set<string>([
   "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
@@ -75,6 +92,48 @@ const SWAP_ROUTER_ABI = [
   },
 ] as const;
 
+/**
+ * SwapVM batch entrypoint. `executeAtomic` runs an ordered list of sub-calls in
+ * a single transaction and reverts the whole batch if any leg fails — this is
+ * what makes "Zap & Yield" atomic: the Aqua swap and the Lido `submit` either
+ * both land or neither does. Each `Call` mirrors the `(target, value, callData)`
+ * shape used by common multicall routers.
+ */
+const SWAPVM_BATCH_ABI = [
+  {
+    type: "function",
+    name: "executeAtomic",
+    stateMutability: "payable",
+    inputs: [
+      {
+        name: "calls",
+        type: "tuple[]",
+        components: [
+          { name: "target", type: "address" },
+          { name: "value", type: "uint256" },
+          { name: "callData", type: "bytes" },
+        ],
+      },
+    ],
+    outputs: [{ name: "results", type: "bytes[]" }],
+  },
+] as const;
+
+/**
+ * Lido stETH `submit(address _referral)` — payable. Deposits the ETH sent with
+ * the call into Lido Liquid Staking and mints stETH to the caller.
+ * @see https://docs.lido.fi/contracts/lido#submit
+ */
+const LIDO_STETH_ABI = [
+  {
+    type: "function",
+    name: "submit",
+    stateMutability: "payable",
+    inputs: [{ name: "_referral", type: "address" }],
+    outputs: [{ name: "sharesAmount", type: "uint256" }],
+  },
+] as const;
+
 // --- Errors ----------------------------------------------------------------
 
 /** Bad client input — surfaced as HTTP 400. */
@@ -106,6 +165,10 @@ export interface SwapEnv {
   /** LP address whose shipped strategy is being traded against, if known. */
   maker: string | null;
   strategySalt: Hex;
+  /** Lido stETH contract the Zap & Yield flow stakes into. */
+  lidoSteth: string;
+  /** Referral address forwarded to Lido `submit` (defaults to the zero address). */
+  lidoReferral: string;
 }
 
 /**
@@ -140,6 +203,10 @@ export function resolveSwapEnv(env: NodeJS.ProcessEnv = process.env): SwapEnv {
     aquaApp: normaliseAddressOr(env.AQUA_APP_ADDRESS, aquaContract),
     maker: env.AQUA_MAKER_ADDRESS ? safeChecksum(env.AQUA_MAKER_ADDRESS, "AQUA_MAKER_ADDRESS") : null,
     strategySalt: normaliseSalt(env.AQUA_STRATEGY_SALT),
+    lidoSteth: normaliseAddressOr(env.LIDO_STETH_ADDRESS, LIDO_STETH_ADDRESS),
+    lidoReferral: env.LIDO_REFERRAL_ADDRESS
+      ? safeChecksum(env.LIDO_REFERRAL_ADDRESS, "LIDO_REFERRAL_ADDRESS")
+      : getAddress(ZERO_ADDRESS),
   };
 }
 
@@ -227,10 +294,49 @@ function requireAddress(value: unknown, field: string): string {
 
 // --- Compilation -----------------------------------------------------------
 
+/** Yield strategies the compiler can append to a swap. */
+export type YieldStrategy = "lido-steth";
+
+export interface CompileSwapOptions {
+  /**
+   * When set, the swap output is deposited into a yield protocol inside the same
+   * transaction and `data` becomes an atomic SwapVM batch instead of a bare swap.
+   * `"lido-steth"` → Aqua swap to ETH, then Lido `submit` → stETH.
+   */
+  yieldStrategy?: YieldStrategy;
+}
+
+/** One leg of an atomic SwapVM batch. */
+export interface AtomicStep {
+  index: number;
+  kind: "aqua-swap" | "lido-submit";
+  target: string;
+  calldata: Hex;
+}
+
+/** Yield-leg metadata attached to a Zap & Yield compilation. */
+export interface YieldMeta {
+  strategy: YieldStrategy;
+  /** Token the user ends up holding. */
+  yieldToken: "stETH";
+  targetProtocol: "Lido Staking";
+  /** Lido stETH contract the batch stakes into. */
+  lidoContract: string;
+  /** Referral address passed to Lido `submit`. */
+  referral: string;
+  /** Encoded `submit(referral)` calldata (Step 2). */
+  submitCalldata: Hex;
+  /** Ordered legs packed into the atomic batch. */
+  steps: AtomicStep[];
+}
+
 export interface CompiledSwap {
   /** SwapVM router contract to call. */
   to: string;
-  /** Compiled SwapVM execution calldata. */
+  /**
+   * Compiled SwapVM execution calldata. A bare `swap(...)` call for a plain swap,
+   * or an `executeAtomic([...])` batch (swap + Lido `submit`) for Zap & Yield.
+   */
   data: Hex;
   /** Wei to send with the call (always "0" — source token is an ERC-20). */
   value: string;
@@ -248,6 +354,10 @@ export interface CompiledSwap {
     /** True when the requested `toToken` was native ETH and got routed via WETH. */
     wrapsNative: boolean;
     maker: string;
+    /** The inner Aqua `swap(...)` calldata (Step 1), kept visible even when wrapped in a batch. */
+    swapCalldata: Hex;
+    /** Present only for a Zap & Yield compilation; `null` for a plain swap. */
+    yield: YieldMeta | null;
     /** Maker-side liquidity provisioning tx built with the Aqua SDK, for reference. */
     aqua: { shipTo: string; shipCalldata: Hex };
   };
@@ -257,8 +367,19 @@ export interface CompiledSwap {
  * Compiles the 1inch Aqua SwapVM execution calldata for `req`.
  * Deterministic and offline — no network access. Throws only on genuinely
  * un-encodable input (which `parseSwapRequest` should already have rejected).
+ *
+ * With `opts.yieldStrategy === "lido-steth"` it compiles the full "Zap & Yield"
+ * flow instead of a bare swap:
+ *   1. Swap input USDC → ETH through 1inch Aqua liquidity.
+ *   2. Encode Lido `submit(referral)` to stake that ETH into Lido.
+ *   3. Pack both legs into one `executeAtomic([...])` SwapVM batch so the whole
+ *      operation lands (or reverts) in a single transaction.
  */
-export function compileAquaSwap(req: SwapRequest, env: SwapEnv): CompiledSwap {
+export function compileAquaSwap(
+  req: SwapRequest,
+  env: SwapEnv,
+  opts: CompileSwapOptions = {},
+): CompiledSwap {
   const wrapsNative = NATIVE_TOKEN_ALIASES.has(req.toToken.toLowerCase());
   const targetToken = wrapsNative ? getAddress(MAINNET_WETH) : req.toToken;
   const maker = getAddress(env.maker ?? env.aquaApp);
@@ -286,8 +407,8 @@ export function compileAquaSwap(req: SwapRequest, env: SwapEnv): CompiledSwap {
     new HexString(strategy),
   ).toString();
 
-  // Taker-side execution calldata: this is what the user's wallet signs.
-  const data = encodeFunctionData({
+  // Step 1 — taker-side Aqua swap calldata (USDC -> ETH via Aqua liquidity).
+  const swapCalldata = encodeFunctionData({
     abi: SWAP_ROUTER_ABI,
     functionName: "swap",
     args: [getAddress(env.aquaApp), strategyTuple, zeroForOne, BigInt(req.amount)],
@@ -304,11 +425,53 @@ export function compileAquaSwap(req: SwapRequest, env: SwapEnv): CompiledSwap {
     ],
   });
 
+  // Default (plain swap): the wallet signs the bare `swap(...)` call.
+  let to = getAddress(env.swapRouter);
+  let data: Hex = swapCalldata;
+  let estimatedGas = DEFAULT_GAS_LIMIT;
+  let yieldMeta: YieldMeta | null = null;
+
+  if (opts.yieldStrategy === "lido-steth") {
+    // Step 2 — encode Lido `submit(referral)` to stake the swapped-out ETH.
+    const lidoContract = getAddress(env.lidoSteth);
+    const referral = getAddress(env.lidoReferral);
+    const submitCalldata = encodeFunctionData({
+      abi: LIDO_STETH_ABI,
+      functionName: "submit",
+      args: [referral],
+    });
+
+    const steps: AtomicStep[] = [
+      { index: 0, kind: "aqua-swap", target: getAddress(env.aquaApp), calldata: swapCalldata },
+      { index: 1, kind: "lido-submit", target: lidoContract, calldata: submitCalldata },
+    ];
+
+    // Step 3 — pack both legs into one atomic SwapVM batch. The router forwards
+    // the ETH produced by leg 0 into leg 0's Lido `submit`; `value` from the
+    // user's wallet stays 0 because the source token is an ERC-20 (USDC).
+    data = encodeFunctionData({
+      abi: SWAPVM_BATCH_ABI,
+      functionName: "executeAtomic",
+      args: [steps.map((s) => ({ target: getAddress(s.target), value: BigInt(0), callData: s.calldata }))],
+    });
+    to = getAddress(env.swapRouter);
+    estimatedGas = DEFAULT_ZAP_GAS_LIMIT;
+    yieldMeta = {
+      strategy: "lido-steth",
+      yieldToken: "stETH",
+      targetProtocol: "Lido Staking",
+      lidoContract,
+      referral,
+      submitCalldata,
+      steps,
+    };
+  }
+
   return {
-    to: getAddress(env.swapRouter),
+    to,
     data,
     value: "0",
-    estimatedGas: DEFAULT_GAS_LIMIT,
+    estimatedGas,
     meta: {
       chainId: CHAIN_ID,
       aquaContract: getAddress(env.aquaContract),
@@ -320,6 +483,8 @@ export function compileAquaSwap(req: SwapRequest, env: SwapEnv): CompiledSwap {
       poolToken1: token1,
       wrapsNative,
       maker,
+      swapCalldata,
+      yield: yieldMeta,
       aqua: { shipTo: getAddress(shipTx.to), shipCalldata: shipTx.data as Hex },
     },
   };
