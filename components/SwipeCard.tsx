@@ -20,6 +20,8 @@ interface SwipeCardProps {
   token: Token;
   active: boolean;
   stackOffset: number;
+  /** True while `/api/swap` is compiling this card's Zap & Yield batch. */
+  isCompiling?: boolean;
   onSwipeComplete: (direction: "left" | "right", token: Token) => void;
 }
 
@@ -27,6 +29,7 @@ export default function SwipeCard({
   token,
   active,
   stackOffset,
+  isCompiling = false,
   onSwipeComplete,
 }: SwipeCardProps) {
   const [isExiting, setIsExiting] = useState(false);
@@ -80,6 +83,21 @@ export default function SwipeCard({
       }
       transition={{ type: "spring", stiffness: 300, damping: 30 }}
     >
+      {isCompiling && (
+        <motion.span
+          aria-hidden
+          className="pointer-events-none absolute inset-0 rounded-3xl border border-emerald-400/50"
+          animate={{
+            boxShadow: [
+              "0 0 0px 0px rgba(16,185,129,0)",
+              "0 0 28px 4px rgba(16,185,129,0.5)",
+              "0 0 0px 0px rgba(16,185,129,0)",
+            ],
+          }}
+          transition={{ duration: 1.4, repeat: Infinity, ease: "easeInOut" }}
+        />
+      )}
+
       {active && (
         <>
           <motion.span

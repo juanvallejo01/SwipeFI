@@ -1,6 +1,13 @@
-import CardDeck from "@/components/CardDeck";
+"use client";
+
+import { useState } from "react";
+import CardDeck, { type ZapResult } from "@/components/CardDeck";
+import TransactionToast from "@/components/TransactionToast";
 
 export default function Home() {
+  // Última posición Zap & Yield compilada; alimenta el toast de estado.
+  const [zap, setZap] = useState<ZapResult | null>(null);
+
   return (
     <div className="flex flex-1 flex-col items-center gap-6 px-6 py-10 text-center">
       <div className="glass-panel flex max-w-sm flex-col gap-3 rounded-3xl px-6 py-8">
@@ -10,7 +17,14 @@ export default function Home() {
           Aqua SwapVM.
         </p>
       </div>
-      <CardDeck />
+
+      <CardDeck onZap={setZap} />
+
+      <TransactionToast
+        open={zap !== null}
+        result={zap}
+        onDismiss={() => setZap(null)}
+      />
     </div>
   );
 }
