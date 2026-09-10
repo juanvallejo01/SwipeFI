@@ -13,7 +13,13 @@
  * The request is aborted if the component unmounts or a newer swipe comes in.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 
 /** Canonical mainnet USDC — the source token for every Zap & Yield position. */
 export const USDC_ADDRESS = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
@@ -21,7 +27,7 @@ export const USDC_ADDRESS = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
 export const WETH_ADDRESS = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
 /**
  * Hardhat / Anvil test account #0 — the wallet the Day 3 mainnet fork funds
- * with 5,000 USDC and 10 ETH for gas.
+ * with 5,000 USDC and 10 ETH for gas. Used whenever no real wallet is attached.
  */
 export const TEST_WALLET_ADDRESS =
   "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266";
@@ -29,6 +35,112 @@ export const TEST_WALLET_ADDRESS =
 export const DEFAULT_ZAP_AMOUNT = "5000000000";
 
 const SWAP_ENDPOINT = "/api/swap";
+
+const EVM_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
+
+/** Where the active address came from. `"demo"` → the funded fork test account. */
+export type WalletSource = "injected" | "telegram" | "demo";
+
+export interface ActiveWallet {
+  address: string;
+  source: WalletSource;
+  /** True when we fell back to {@link TEST_WALLET_ADDRESS}. */
+  isDemo: boolean;
+  /** Telegram `@username` / first name, when opened inside a Telegram client. */
+  telegramUser: string | null;
+}
+
+const DEMO_WALLET: ActiveWallet = {
+  address: TEST_WALLET_ADDRESS,
+  source: "demo",
+  isDemo: true,
+  telegramUser: null,
+};
+
+interface InjectedProvider {
+  selectedAddress?: string | null;
+  on?: (event: string, handler: (...args: unknown[]) => void) => void;
+  removeListener?: (event: string, handler: (...args: unknown[]) => void) => void;
+}
+
+/**
+ * Resolves the wallet to sign the Zap with, browser-only:
+ *   1. an injected EVM provider (`window.ethereum`) with an already-connected
+ *      account — no popup, we only read `selectedAddress`;
+ *   2. an address surfaced by a wallet-enabled Telegram client on
+ *      `WebApp.initDataUnsafe.user`;
+ *   3. otherwise the funded fork test account, flagged `isDemo`.
+ */
+function resolveActiveWallet(): ActiveWallet {
+  if (typeof window === "undefined") return DEMO_WALLET;
+
+  const tgUser = window.Telegram?.WebApp?.initDataUnsafe?.user as
+    | { wallet_address?: string; username?: string; first_name?: string }
+    | undefined;
+  const telegramUser = tgUser
+    ? tgUser.username
+      ? `@${tgUser.username}`
+      : (tgUser.first_name ?? null)
+    : null;
+
+  const injected = (window as { ethereum?: InjectedProvider }).ethereum
+    ?.selectedAddress;
+  if (injected && EVM_ADDRESS_RE.test(injected)) {
+    return { address: injected, source: "injected", isDemo: false, telegramUser };
+  }
+
+  if (tgUser?.wallet_address && EVM_ADDRESS_RE.test(tgUser.wallet_address)) {
+    return {
+      address: tgUser.wallet_address,
+      source: "telegram",
+      isDemo: false,
+      telegramUser,
+    };
+  }
+
+  return { ...DEMO_WALLET, telegramUser };
+}
+
+// Cache the snapshot so `useSyncExternalStore` sees a stable reference until the
+// resolved wallet actually changes (same pattern as WelcomeHeader's TG store).
+let cachedWallet: ActiveWallet = DEMO_WALLET;
+
+function getWalletSnapshot(): ActiveWallet {
+  const next = resolveActiveWallet();
+  if (
+    next.address === cachedWallet.address &&
+    next.source === cachedWallet.source &&
+    next.telegramUser === cachedWallet.telegramUser
+  ) {
+    return cachedWallet;
+  }
+  cachedWallet = next;
+  return next;
+}
+
+function getServerWalletSnapshot(): ActiveWallet {
+  return DEMO_WALLET;
+}
+
+function subscribeWallet(onChange: () => void): () => void {
+  if (typeof window === "undefined") return () => {};
+  const provider = (window as { ethereum?: InjectedProvider }).ethereum;
+  provider?.on?.("accountsChanged", onChange);
+  return () => provider?.removeListener?.("accountsChanged", onChange);
+}
+
+/**
+ * Live view of the active wallet. Renders the demo account on the server and the
+ * first client paint (no hydration mismatch), then reflects the injected /
+ * Telegram address, updating on `accountsChanged`.
+ */
+export function useActiveWallet(): ActiveWallet {
+  return useSyncExternalStore(
+    subscribeWallet,
+    getWalletSnapshot,
+    getServerWalletSnapshot,
+  );
+}
 
 /** Yield metadata surfaced to the UI (subset of the route's `meta` object). */
 export interface SwapPositionMeta {
@@ -99,9 +211,12 @@ export interface UseSwapPositionResult {
   txData: SwapPositionTx | null;
   meta: SwapPositionMeta | null;
   warnings: string[];
+  /** Wallet `openPosition` signs with when `walletAddress` is not passed. */
+  activeWallet: ActiveWallet;
 }
 
 export function useSwapPosition(): UseSwapPositionResult {
+  const activeWallet = useActiveWallet();
   const [isLoading, setIsLoading] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -145,7 +260,7 @@ export function useSwapPosition(): UseSwapPositionResult {
         fromToken: args.fromToken ?? USDC_ADDRESS,
         toToken: args.toToken ?? WETH_ADDRESS,
         amount: args.amount ?? DEFAULT_ZAP_AMOUNT,
-        walletAddress: args.walletAddress ?? TEST_WALLET_ADDRESS,
+        walletAddress: args.walletAddress ?? activeWallet.address,
       };
 
       try {
@@ -203,7 +318,7 @@ export function useSwapPosition(): UseSwapPositionResult {
         return null;
       }
     },
-    [],
+    [activeWallet.address],
   );
 
   return {
@@ -215,6 +330,7 @@ export function useSwapPosition(): UseSwapPositionResult {
     txData,
     meta,
     warnings,
+    activeWallet,
   };
 }
 

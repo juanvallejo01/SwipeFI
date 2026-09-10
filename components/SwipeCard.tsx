@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
+import Image from "next/image";
 import {
   motion,
   useAnimation,
@@ -15,6 +16,155 @@ import type { Token } from "@/components/CardDeck";
 const SWIPE_THRESHOLD = 150;
 // que tan lejos vuela la card fuera de pantalla al ser descartada
 const EXIT_DISTANCE = 500;
+
+// Brand colours (Viem token palette) — drive the ambient glow and the CSS
+// fallback badge when the local asset fails to load.
+const TOKEN_BRAND: Record<string, string> = {
+  ETH: "#627EEA",
+  WETH: "#627EEA",
+  USDC: "#2775CA",
+  BTC: "#F7931A",
+  WBTC: "#F7931A",
+  SOL: "#14F195",
+  LINK: "#2A5ADA",
+  AAVE: "#B6509E",
+  LIDO: "#00A3FF",
+};
+const DEFAULT_BRAND = "#64748B";
+
+/** "#627EEA" → "rgba(98,126,234,<alpha>)". */
+function hexToRgba(hex: string, alpha: number): string {
+  const n = parseInt(hex.replace("#", ""), 16);
+  const r = (n >> 16) & 255;
+  const g = (n >> 8) & 255;
+  const b = n & 255;
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+/**
+ * Neon glowing 7-day trend sparkline. Deterministic SVG path from `data`
+ * (oldest → newest), with a gradient fill under the curve and a pulsing
+ * end-point.
+ */
+function Sparkline({
+  data,
+  className,
+}: {
+  data: number[];
+  className?: string;
+}) {
+  const gid = useId();
+  const w = 120;
+  const h = 36;
+  const pad = 3;
+
+  const min = Math.min(...data);
+  const max = Math.max(...data);
+  const range = max - min || 1;
+
+  const pts = data.map((v, i) => {
+    const x = pad + (i / (data.length - 1)) * (w - pad * 2);
+    const y = pad + (1 - (v - min) / range) * (h - pad * 2);
+    return [x, y] as const;
+  });
+
+  const line = pts
+    .map(([x, y], i) => `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`)
+    .join(" ");
+  const [lastX, lastY] = pts[pts.length - 1];
+  const area = `${line} L${lastX.toFixed(1)},${h} L${pts[0][0].toFixed(1)},${h} Z`;
+
+  return (
+    <svg
+      viewBox={`0 0 ${w} ${h}`}
+      preserveAspectRatio="none"
+      className={className}
+      aria-hidden
+    >
+      <defs>
+        <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="rgb(52,211,153)" stopOpacity="0.35" />
+          <stop offset="100%" stopColor="rgb(52,211,153)" stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <path d={area} fill={`url(#${gid})`} />
+      <path
+        d={line}
+        fill="none"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className="stroke-emerald-400 drop-shadow-[0_0_8px_rgba(52,211,153,0.5)]"
+      />
+      <circle
+        cx={lastX}
+        cy={lastY}
+        r="2.5"
+        className="fill-emerald-300 drop-shadow-[0_0_6px_rgba(52,211,153,0.9)]"
+      >
+        <animate
+          attributeName="opacity"
+          values="1;0.3;1"
+          dur="1.8s"
+          repeatCount="indefinite"
+        />
+      </circle>
+    </svg>
+  );
+}
+
+/**
+ * Levitating token mark: a Framer-Motion floating container, a cyan→indigo
+ * gradient aura, and the local asset inside a glass tile. Falls back to a crisp
+ * brand-coloured symbol badge if the asset fails to load.
+ */
+function FloatingTokenIcon({ token }: { token: Token }) {
+  const [imgFailed, setImgFailed] = useState(false);
+  const brand = TOKEN_BRAND[token.symbol.toUpperCase()] ?? DEFAULT_BRAND;
+
+  return (
+    <motion.div
+      className="relative flex h-14 w-14 shrink-0 items-center justify-center"
+      animate={{ y: [-4, 4, -4], rotateZ: [-2, 2, -2] }}
+      transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
+    >
+      {/* glowing gradient aura */}
+      <span
+        aria-hidden
+        className="pointer-events-none absolute -inset-2 rounded-full bg-gradient-to-tr from-cyan-500/20 to-indigo-500/20 blur-xl"
+      />
+
+      <div
+        className="relative flex h-14 w-14 items-center justify-center overflow-hidden rounded-2xl border border-white/10 bg-white/5 backdrop-blur-md"
+        style={{ boxShadow: `0 0 25px ${hexToRgba(brand, 0.3)}` }}
+      >
+        {imgFailed ? (
+          <span
+            className="flex h-full w-full items-center justify-center rounded-2xl text-[13px] font-black tracking-tight text-white"
+            style={{
+              background: `linear-gradient(135deg, ${brand}, ${hexToRgba(
+                brand,
+                0.65,
+              )})`,
+            }}
+          >
+            {token.symbol.slice(0, 4)}
+          </span>
+        ) : (
+          <Image
+            src={token.icon}
+            alt={`${token.name} icon`}
+            width={40}
+            height={40}
+            className="relative h-10 w-10 object-contain drop-shadow-[0_2px_8px_rgba(0,0,0,0.4)]"
+            onError={() => setImgFailed(true)}
+            unoptimized
+          />
+        )}
+      </div>
+    </motion.div>
+  );
+}
 
 interface SwipeCardProps {
   token: Token;
@@ -102,33 +252,39 @@ export default function SwipeCard({
         <>
           <motion.span
             style={{ opacity: zapOpacity }}
-            className="pointer-events-none absolute right-6 top-6 flex items-center gap-1 rounded-full border border-emerald-400/40 bg-emerald-500/20 px-3 py-1 text-xs font-bold uppercase tracking-wide text-emerald-300"
+            className="pointer-events-none absolute right-6 top-6 z-10 flex items-center gap-1 rounded-full border border-emerald-400/40 bg-emerald-500/20 px-3 py-1 text-xs font-bold uppercase tracking-wide text-emerald-300"
           >
             <Zap className="h-3.5 w-3.5" /> Zap &amp; Yield
           </motion.span>
           <motion.span
             style={{ opacity: skipOpacity }}
-            className="pointer-events-none absolute left-6 top-6 flex items-center gap-1 rounded-full border border-red-400/40 bg-red-500/20 px-3 py-1 text-xs font-bold uppercase tracking-wide text-red-300"
+            className="pointer-events-none absolute left-6 top-6 z-10 flex items-center gap-1 rounded-full border border-red-400/40 bg-red-500/20 px-3 py-1 text-xs font-bold uppercase tracking-wide text-red-300"
           >
             <X className="h-3.5 w-3.5" /> Skip
           </motion.span>
         </>
       )}
 
+      {/* Header — icon + a single flex column so symbol / protocol / source
+          never collide, even while cards are stacked. */}
       <div className="flex items-center gap-3">
-        <span className="text-4xl">{token.logo}</span>
-        <div>
-          <h3 className="text-xl font-bold text-slate-50">{token.symbol}</h3>
-          <p className="text-sm text-slate-400">{token.name}</p>
-        </div>
+        <FloatingTokenIcon token={token} />
+        {active && (
+          <div className="flex flex-col gap-1 leading-tight">
+            <h3 className="text-xl font-bold text-slate-50">{token.symbol}</h3>
+            <p className="text-sm text-slate-300">{token.protocol}</p>
+            <p className="text-xs text-slate-500">via 1inch Aqua</p>
+          </div>
+        )}
       </div>
 
-      {/* el detalle solo se muestra en la card de arriba: las de atras son opacas
-          por el glassmorphism, y mostrar texto completo ahi se ve superpuesto */}
+      {/* Detail — only on the top card; the stack behind stays a clean blur. */}
       {active && (
-        <div className="flex flex-col gap-2">
+        <div className="flex flex-col gap-3">
+          <Sparkline data={token.spark} className="h-9 w-full" />
+
           <div className="flex items-center justify-between text-sm">
-            <span className="text-slate-400">24h</span>
+            <span className="text-slate-400">7-day trend</span>
             <span
               className={`flex items-center gap-1 font-semibold ${
                 isPositive ? "text-emerald-400" : "text-red-400"
@@ -143,12 +299,24 @@ export default function SwipeCard({
               {token.change24h}%
             </span>
           </div>
+
           <div className="flex items-center justify-between text-sm">
             <span className="text-slate-400">Est. APY</span>
-            <span className="font-semibold text-slate-50">{token.apy}%</span>
+            <span className="font-semibold text-emerald-300">{token.apy}</span>
           </div>
-          <span className="w-fit rounded-full bg-white/5 px-3 py-1 text-xs text-slate-300">
-            {token.aiTag}
+
+          <span className="flex w-fit items-center gap-1.5 rounded-full bg-white/5 px-3 py-1 text-xs text-slate-300">
+            {token.yieldIcon && (
+              <Image
+                src={token.yieldIcon}
+                alt=""
+                width={14}
+                height={14}
+                className="h-3.5 w-3.5 object-contain"
+                unoptimized
+              />
+            )}
+            {token.action}
           </span>
         </div>
       )}

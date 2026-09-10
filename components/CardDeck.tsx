@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Loader2 } from "lucide-react";
+import { Loader2, RotateCcw } from "lucide-react";
 import SwipeCard from "@/components/SwipeCard";
 import {
   useSwapPosition,
@@ -11,12 +11,23 @@ import {
 } from "@/hooks/useSwapPosition";
 
 export interface Token {
+  /** Asset the USDC gets zapped into. */
   symbol: string;
   name: string;
-  logo: string;
+  /** Local asset path, e.g. "/tokens/eth.avif". */
+  icon: string;
+  /** Optional yield-protocol mark shown on the action chip. */
+  yieldIcon?: string;
+  /** Destination protocol, e.g. "Lido Staking". */
+  protocol: string;
+  /** Headline APY as a display string, e.g. "3.4%". */
+  apy: string;
+  /** One-line flow, e.g. "Zap USDC ➔ stETH". */
+  action: string;
+  /** 24h change — drives the trend colour + sign. */
   change24h: number;
-  apy: number;
-  aiTag: string;
+  /** 7-day trend points for the sparkline (oldest → newest). */
+  spark: number[];
 }
 
 /** A compiled Zap & Yield position, tagged with the card that produced it. */
@@ -27,52 +38,90 @@ export interface ZapResult extends SwapPositionResult {
 interface CardDeckProps {
   /** Called once `/api/swap` returns the compiled SwapVM batch for a swipe-right. */
   onZap?: (result: ZapResult) => void;
+  /** Fires with the symbol of the card now on top (or `null` when the deck is
+   *  empty) — drives the page's reactive background glow. */
+  onActiveTokenChange?: (symbol: string | null) => void;
 }
 
-// Mainnet ERC-20 addresses for the swap leg of the Zap & Yield flow. The atomic
-// batch always stakes the swapped-out ETH into Lido for stETH; this map only
-// picks which token 1inch Aqua routes the USDC through first.
+// Mainnet ERC-20 addresses for the swap leg of the Zap & Yield flow. This map
+// only picks which token 1inch Aqua routes the USDC through first; USDC and SOL
+// fall back to WETH for the demo swap leg.
 const TOKEN_ADDRESSES: Record<string, string> = {
   ETH: WETH_ADDRESS,
+  WBTC: "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599",
   LINK: "0x514910771AF9Ca656af840dff83E8264EcF986CA",
-  UNI: "0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984",
 };
 
-// dataset simulado: en Day 3 esto vendra de un feed real de precios/APY
-const MOCK_TOKENS: Token[] = [
+// Curated demo strategies. Day 3 will replace the static APY / trend with a
+// real price + yield feed.
+const STRATEGIES: Token[] = [
   {
     symbol: "ETH",
     name: "Ethereum",
-    logo: "🔷",
+    icon: "/tokens/eth.avif",
+    yieldIcon: "/tokens/lido.png",
+    protocol: "Lido Staking",
+    apy: "3.4%",
+    action: "Zap USDC ➔ stETH",
     change24h: 2.4,
-    apy: 4.8,
-    aiTag: "Strong momentum this week",
+    spark: [38, 40, 39, 43, 47, 46, 52, 55],
+  },
+  {
+    symbol: "USDC",
+    name: "USD Coin",
+    icon: "/tokens/usdc.webp",
+    yieldIcon: "/tokens/aave.png",
+    protocol: "Aave V3",
+    apy: "4.8%",
+    action: "Deposit USDC ➔ aUSDC",
+    change24h: 0.1,
+    spark: [50, 50, 51, 50, 50, 51, 50, 51],
+  },
+  {
+    symbol: "WBTC",
+    name: "Wrapped Bitcoin",
+    icon: "/tokens/wbtc.png",
+    protocol: "1inch Aqua Batch",
+    apy: "2.1%",
+    action: "Zap USDC ➔ WBTC",
+    change24h: -0.8,
+    spark: [60, 58, 59, 55, 53, 54, 52, 51],
+  },
+  {
+    symbol: "SOL",
+    name: "Solana",
+    icon: "/tokens/sol.png",
+    protocol: "Liquid Staking",
+    apy: "6.5%",
+    action: "Zap USDC ➔ SOL",
+    change24h: 3.1,
+    spark: [30, 33, 32, 38, 41, 45, 44, 50],
   },
   {
     symbol: "LINK",
     name: "Chainlink",
-    logo: "🔗",
+    icon: "/tokens/link.png",
+    protocol: "1inch Aqua Batch",
+    apy: "5.2%",
+    action: "Zap USDC ➔ LINK",
     change24h: -1.1,
-    apy: 6.2,
-    aiTag: "Oracle demand rising",
-  },
-  {
-    symbol: "UNI",
-    name: "Uniswap",
-    logo: "🦄",
-    change24h: 0.8,
-    apy: 5.5,
-    aiTag: "DEX volume trending up",
+    spark: [46, 45, 47, 44, 43, 45, 42, 41],
   },
 ];
 
 // cuantas cards de la pila se muestran detras de la que esta activa
 const VISIBLE_STACK_SIZE = 3;
 
-export default function CardDeck({ onZap }: CardDeckProps) {
+export default function CardDeck({ onZap, onActiveTokenChange }: CardDeckProps) {
   // indice del token que esta arriba de la pila (el interactivo)
   const [currentIndex, setCurrentIndex] = useState(0);
   const swap = useSwapPosition();
+
+  // El símbolo de la card de arriba; se lo pasamos al fondo reactivo del padre.
+  const activeSymbol = STRATEGIES[currentIndex]?.symbol ?? null;
+  useEffect(() => {
+    onActiveTokenChange?.(activeSymbol);
+  }, [activeSymbol, onActiveTokenChange]);
 
   async function handleSwipeRight(token: Token) {
     console.log(`Initiating 1inch SwapVM position for ${token.symbol}`);
@@ -104,16 +153,36 @@ export default function CardDeck({ onZap }: CardDeckProps) {
     }
   }
 
-  const visibleTokens = MOCK_TOKENS.slice(
+  const visibleTokens = STRATEGIES.slice(
     currentIndex,
     currentIndex + VISIBLE_STACK_SIZE,
   );
 
   return (
-    <div className="relative h-96 w-full max-w-sm">
+    // Height tracks the viewport so short Telegram webviews (native bottom nav
+    // eating vertical space) never clip the active card.
+    <div className="relative h-[min(24rem,58vh)] w-full max-w-sm">
       {visibleTokens.length === 0 ? (
-        <div className="glass-panel flex h-full w-full items-center justify-center rounded-3xl border-white/10 px-6 text-center text-sm text-slate-400">
-          No more tokens to review — check back later.
+        <div className="glass-panel flex h-full w-full flex-col items-center justify-center gap-4 rounded-3xl border-white/10 px-6 text-center">
+          <div className="flex flex-col gap-1">
+            <p className="text-base font-semibold text-slate-100">
+              You&rsquo;ve reviewed every strategy
+            </p>
+            <p className="text-xs text-slate-400">
+              Reset the deck to swipe through them again.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              swap.reset();
+              setCurrentIndex(0);
+            }}
+            className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-5 py-2.5 text-sm font-semibold text-slate-100 shadow-lg shadow-black/20 backdrop-blur-md transition hover:border-emerald-400/40 hover:bg-emerald-500/10 hover:text-emerald-200"
+          >
+            <RotateCcw className="h-4 w-4" />
+            Reset Deck
+          </button>
         </div>
       ) : (
         visibleTokens.map((token, stackOffset) => (
