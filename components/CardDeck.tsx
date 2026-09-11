@@ -112,7 +112,10 @@ const STRATEGIES: Token[] = [
 // cuantas cards de la pila se muestran detras de la que esta activa
 const VISIBLE_STACK_SIZE = 3;
 
-export default function CardDeck({ onZap, onActiveTokenChange }: CardDeckProps) {
+export default function CardDeck({
+  onZap,
+  onActiveTokenChange,
+}: CardDeckProps) {
   // indice del token que esta arriba de la pila (el interactivo)
   const [currentIndex, setCurrentIndex] = useState(0);
   const swap = useSwapPosition();
@@ -155,104 +158,123 @@ export default function CardDeck({ onZap, onActiveTokenChange }: CardDeckProps) 
 
   const visibleTokens = STRATEGIES.slice(
     currentIndex,
-    currentIndex + VISIBLE_STACK_SIZE,
+    currentIndex + VISIBLE_STACK_SIZE
   );
 
   return (
-    // Height tracks the viewport so short Telegram webviews (native bottom nav
-    // eating vertical space) never clip the active card.
-    <div className="relative h-[min(24rem,58vh)] w-full max-w-sm">
-      {visibleTokens.length === 0 ? (
-        <div className="glass-panel flex h-full w-full flex-col items-center justify-center gap-4 rounded-3xl border-white/10 px-6 text-center">
-          <div className="flex flex-col gap-1">
-            <p className="text-base font-semibold text-slate-100">
-              You&rsquo;ve reviewed every strategy
-            </p>
-            <p className="text-xs text-slate-400">
-              Reset the deck to swipe through them again.
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={() => {
-              swap.reset();
-              setCurrentIndex(0);
-            }}
-            className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-5 py-2.5 text-sm font-semibold text-slate-100 shadow-lg shadow-black/20 backdrop-blur-md transition hover:border-emerald-400/40 hover:bg-emerald-500/10 hover:text-emerald-200"
-          >
-            <RotateCcw className="h-4 w-4" />
-            Reset Deck
-          </button>
+    <div className="flex w-full max-w-sm flex-col gap-3">
+      {/* Direction hints live above the deck, in normal flow, so they never
+          sit on top of the card's own icon/title. */}
+      {visibleTokens.length > 0 && (
+        <div className="flex items-center justify-between px-1">
+          <span className="rounded-full border border-rose-500/20 bg-rose-500/10 px-3 py-1 text-xs font-bold text-rose-400">
+            Skip
+          </span>
+          <span className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-1 text-xs font-bold text-emerald-400">
+            Zap Yield
+          </span>
         </div>
-      ) : (
-        visibleTokens.map((token, stackOffset) => (
-          <SwipeCard
-            key={token.symbol}
-            token={token}
-            active={stackOffset === 0}
-            stackOffset={stackOffset}
-            isCompiling={stackOffset === 0 && swap.isLoading}
-            onSwipeComplete={handleSwipeComplete}
-          />
-        ))
       )}
 
-      <AnimatePresence>
-        {swap.isLoading && (
-          <motion.div
-            key="zap-compiling"
-            initial={{ opacity: 0, scale: 0.96 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.96 }}
-            className="glass-panel absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 rounded-3xl border-emerald-400/30 text-center"
-          >
-            {/* halo verde que respira mientras se compila el batch */}
-            <motion.span
-              aria-hidden
-              className="pointer-events-none absolute inset-0 rounded-3xl"
-              animate={{
-                boxShadow: [
-                  "0 0 0px 0px rgba(16,185,129,0)",
-                  "0 0 34px 6px rgba(16,185,129,0.45)",
-                  "0 0 0px 0px rgba(16,185,129,0)",
-                ],
-              }}
-              transition={{ duration: 1.6, repeat: Infinity, ease: "easeInOut" }}
-            />
-            <Loader2 className="h-7 w-7 animate-spin text-emerald-300" />
-            <p className="text-sm font-semibold text-emerald-200">
-              Compiling SwapVM batch…
-            </p>
-            <p className="text-xs text-slate-400">
-              1inch Aqua swap &rarr; Lido stake
-            </p>
-          </motion.div>
-        )}
-
-        {swap.error && (
-          <motion.div
-            key="zap-error"
-            initial={{ opacity: 0, scale: 0.96 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.96 }}
-            className="glass-panel absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 rounded-3xl border-red-400/30 px-6 text-center"
-          >
-            <p className="text-sm font-semibold text-red-300">
-              Couldn&rsquo;t compile the swap
-            </p>
-            <p className="max-w-full break-words text-xs text-slate-400">
-              {swap.error}
-            </p>
+      {/* Height tracks the viewport so short Telegram webviews (native bottom
+          nav eating vertical space) never clip the active card. */}
+      <div className="relative z-10 isolate h-[min(24rem,58vh)] w-full">
+        {visibleTokens.length === 0 ? (
+          <div className="glass-panel flex h-full w-full flex-col items-center justify-center gap-4 rounded-3xl border-white/10 px-6 text-center">
+            <div className="flex flex-col gap-1">
+              <p className="text-base font-semibold text-slate-100">
+                You&rsquo;ve reviewed every strategy
+              </p>
+              <p className="text-xs text-slate-400">
+                Reset the deck to swipe through them again.
+              </p>
+            </div>
             <button
               type="button"
-              onClick={() => swap.reset()}
-              className="mt-1 rounded-full border border-white/15 bg-white/5 px-4 py-1.5 text-xs font-semibold text-slate-200 transition hover:bg-white/10"
+              onClick={() => {
+                swap.reset();
+                setCurrentIndex(0);
+              }}
+              className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-5 py-2.5 text-sm font-semibold text-slate-100 shadow-lg shadow-black/20 backdrop-blur-md transition hover:border-emerald-400/40 hover:bg-emerald-500/10 hover:text-emerald-200"
             >
-              Dismiss
+              <RotateCcw className="h-4 w-4" />
+              Reset Deck
             </button>
-          </motion.div>
+          </div>
+        ) : (
+          visibleTokens.map((token, stackOffset) => (
+            <SwipeCard
+              key={token.symbol}
+              token={token}
+              active={stackOffset === 0}
+              stackOffset={stackOffset}
+              isCompiling={stackOffset === 0 && swap.isLoading}
+              onSwipeComplete={handleSwipeComplete}
+            />
+          ))
         )}
-      </AnimatePresence>
+
+        <AnimatePresence>
+          {swap.isLoading && (
+            <motion.div
+              key="zap-compiling"
+              initial={{ opacity: 0, scale: 0.96 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.96 }}
+              className="glass-panel absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 rounded-3xl border-emerald-400/30 text-center"
+            >
+              {/* halo verde que respira mientras se compila el batch */}
+              <motion.span
+                aria-hidden
+                className="pointer-events-none absolute inset-0 rounded-3xl"
+                animate={{
+                  boxShadow: [
+                    "0 0 0px 0px rgba(16,185,129,0)",
+                    "0 0 34px 6px rgba(16,185,129,0.45)",
+                    "0 0 0px 0px rgba(16,185,129,0)",
+                  ],
+                }}
+                transition={{
+                  duration: 1.6,
+                  repeat: Infinity,
+                  ease: "easeInOut",
+                }}
+              />
+              <Loader2 className="h-7 w-7 animate-spin text-emerald-300" />
+              <p className="text-sm font-semibold text-emerald-200">
+                Compiling SwapVM batch…
+              </p>
+              <p className="text-xs text-slate-400">
+                1inch Aqua swap &rarr; Lido stake
+              </p>
+            </motion.div>
+          )}
+
+          {swap.error && (
+            <motion.div
+              key="zap-error"
+              initial={{ opacity: 0, scale: 0.96 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.96 }}
+              className="glass-panel absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 rounded-3xl border-red-400/30 px-6 text-center"
+            >
+              <p className="text-sm font-semibold text-red-300">
+                Couldn&rsquo;t compile the swap
+              </p>
+              <p className="max-w-full break-words text-xs text-slate-400">
+                {swap.error}
+              </p>
+              <button
+                type="button"
+                onClick={() => swap.reset()}
+                className="mt-1 rounded-full border border-white/15 bg-white/5 px-4 py-1.5 text-xs font-semibold text-slate-200 transition hover:bg-white/10"
+              >
+                Dismiss
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
     </div>
   );
 }

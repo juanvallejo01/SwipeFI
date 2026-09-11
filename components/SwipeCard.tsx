@@ -9,7 +9,7 @@ import {
   useTransform,
   type PanInfo,
 } from "framer-motion";
-import { TrendingDown, TrendingUp, X, Zap } from "lucide-react";
+import { TrendingDown, TrendingUp } from "lucide-react";
 import type { Token } from "@/components/CardDeck";
 
 // mas alla de estos px en X, el swipe cuenta como decision (skip / zap)
@@ -72,7 +72,9 @@ function Sparkline({
     .map(([x, y], i) => `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`)
     .join(" ");
   const [lastX, lastY] = pts[pts.length - 1];
-  const area = `${line} L${lastX.toFixed(1)},${h} L${pts[0][0].toFixed(1)},${h} Z`;
+  const area = `${line} L${lastX.toFixed(1)},${h} L${pts[0][0].toFixed(
+    1
+  )},${h} Z`;
 
   return (
     <svg
@@ -144,7 +146,7 @@ function FloatingTokenIcon({ token }: { token: Token }) {
             style={{
               background: `linear-gradient(135deg, ${brand}, ${hexToRgba(
                 brand,
-                0.65,
+                0.65
               )})`,
             }}
           >
@@ -189,14 +191,14 @@ export default function SwipeCard({
   const x = useMotionValue(0);
   // rotacion dinamica: entre mas se arrastra a un lado, mas se inclina la card
   const rotate = useTransform(x, [-300, 300], [-20, 20]);
-  // opacidad de la etiqueta verde "ZAP & YIELD" al arrastrar a la derecha
-  const zapOpacity = useTransform(x, [0, SWIPE_THRESHOLD], [0, 1]);
-  // opacidad de la etiqueta roja "SKIP" al arrastrar a la izquierda
-  const skipOpacity = useTransform(x, [-SWIPE_THRESHOLD, 0], [1, 0]);
+  // halo verde: aparece pasados +30px de arrastre a la derecha
+  const rightGlowOpacity = useTransform(x, [30, 150], [0, 0.55]);
+  // halo rojo: aparece pasados -30px de arrastre a la izquierda
+  const leftGlowOpacity = useTransform(x, [-150, -30], [0.55, 0]);
 
   function handleDragEnd(
     _event: MouseEvent | TouchEvent | PointerEvent,
-    info: PanInfo,
+    info: PanInfo
   ) {
     const passedThreshold = Math.abs(info.offset.x) > SWIPE_THRESHOLD;
     if (!passedThreshold) {
@@ -250,18 +252,18 @@ export default function SwipeCard({
 
       {active && (
         <>
+          {/* Halo de arrastre: verde a la derecha, rojo a la izquierda — solo
+              se nota pasados los ±30px que marca el requisito. */}
           <motion.span
-            style={{ opacity: zapOpacity }}
-            className="pointer-events-none absolute right-6 top-6 z-10 flex items-center gap-1 rounded-full border border-emerald-400/40 bg-emerald-500/20 px-3 py-1 text-xs font-bold uppercase tracking-wide text-emerald-300"
-          >
-            <Zap className="h-3.5 w-3.5" /> Zap &amp; Yield
-          </motion.span>
+            aria-hidden
+            style={{ opacity: rightGlowOpacity }}
+            className="pointer-events-none absolute inset-0 rounded-3xl bg-gradient-to-br from-emerald-500/25 via-emerald-400/10 to-transparent"
+          />
           <motion.span
-            style={{ opacity: skipOpacity }}
-            className="pointer-events-none absolute left-6 top-6 z-10 flex items-center gap-1 rounded-full border border-red-400/40 bg-red-500/20 px-3 py-1 text-xs font-bold uppercase tracking-wide text-red-300"
-          >
-            <X className="h-3.5 w-3.5" /> Skip
-          </motion.span>
+            aria-hidden
+            style={{ opacity: leftGlowOpacity }}
+            className="pointer-events-none absolute inset-0 rounded-3xl bg-gradient-to-bl from-rose-500/25 via-rose-400/10 to-transparent"
+          />
         </>
       )}
 

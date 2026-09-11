@@ -23,7 +23,14 @@
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Check, ChevronDown, Copy, TerminalSquare } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  Copy,
+  Info,
+  Receipt,
+  Settings,
+} from "lucide-react";
 import type { ZapResult } from "@/components/CardDeck";
 import { DEFAULT_ZAP_AMOUNT, useActiveWallet } from "@/hooks/useSwapPosition";
 
@@ -104,7 +111,7 @@ function useNetwork(): NetworkInfo {
   return useSyncExternalStore(
     subscribeNetwork,
     getNetworkSnapshot,
-    getServerNetworkSnapshot,
+    getServerNetworkSnapshot
   );
 }
 
@@ -151,6 +158,11 @@ function executionId(data: string): string {
   return `0x${h.toString(16).padStart(16, "0")}`;
 }
 
+/** "Lido Staking" → "Lido" — the receipt reads better without the suffix. */
+function shortProtocolName(protocol: string): string {
+  return protocol.replace(/\s+Staking$/i, "");
+}
+
 function gasSaved(estimatedGas: string): { abs: string; pct: string } {
   let exec: bigint;
   try {
@@ -172,18 +184,27 @@ interface LogLineProps {
   onCopy?: () => void;
 }
 
-function LogLine({ name, value, tone, copyable, copied, onCopy }: LogLineProps) {
+function LogLine({
+  name,
+  value,
+  tone,
+  copyable,
+  copied,
+  onCopy,
+}: LogLineProps) {
   return (
     <div className="flex items-start gap-2">
       <span className="shrink-0 select-none text-slate-600">&gt;</span>
-      <span className="w-[92px] shrink-0 select-none text-slate-500">{name}</span>
+      <span className="w-[92px] shrink-0 select-none text-slate-500">
+        {name}
+      </span>
       <span
         className={`min-w-0 flex-1 break-all ${
           tone === "accent"
             ? "text-emerald-300"
             : tone === "warn"
-              ? "text-amber-300"
-              : "text-slate-300"
+            ? "text-amber-300"
+            : "text-slate-300"
         }`}
       >
         {value}
@@ -206,12 +227,36 @@ function LogLine({ name, value, tone, copyable, copied, onCopy }: LogLineProps) 
   );
 }
 
+interface ReceiptRowProps {
+  label: string;
+  value: string;
+  tone?: "accent";
+}
+
+/** One line of the human-readable receipt — label left, value right. */
+function ReceiptRow({ label, value, tone }: ReceiptRowProps) {
+  return (
+    <div className="flex items-center justify-between gap-3 py-2">
+      <span className="text-xs font-medium text-slate-400">{label}</span>
+      <span
+        className={`text-right text-sm font-semibold ${
+          tone === "accent" ? "text-emerald-300" : "text-slate-100"
+        }`}
+      >
+        {value}
+      </span>
+    </div>
+  );
+}
+
 export default function TransactionTerminal({
   result,
   onClose,
   onExpandedChange,
 }: TransactionTerminalProps) {
   const [expanded, setExpanded] = useState(false);
+  const [showTrace, setShowTrace] = useState(false);
+  const [showInfo, setShowInfo] = useState(false);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const hadResult = useRef(false);
   const prevExpanded = useRef(expanded);
@@ -236,7 +281,7 @@ export default function TransactionTerminal({
     hadResult.current = true;
     const timer = window.setTimeout(
       () => setExpanded(true),
-      AUTO_EXPAND_DELAY_MS,
+      AUTO_EXPAND_DELAY_MS
     );
     return () => window.clearTimeout(timer);
   }, [result]);
@@ -247,7 +292,7 @@ export default function TransactionTerminal({
       setCopiedKey(key);
       window.setTimeout(
         () => setCopiedKey((c) => (c === key ? null : c)),
-        1200,
+        1200
       );
     } catch {
       // Clipboard is unavailable in some Telegram webviews — fail silently.
@@ -261,6 +306,7 @@ export default function TransactionTerminal({
   const yieldToken = meta?.yieldToken ?? "stETH";
   const apy = meta?.estimatedApy ?? "3.4%";
   const protocol = meta?.targetProtocol ?? "Lido Staking";
+  const protocolShort = shortProtocolName(protocol);
   const saved = tx ? gasSaved(tx.estimatedGas) : null;
   const execId = tx ? executionId(tx.data) : "";
   const warnings = result?.warnings ?? [];
@@ -303,9 +349,9 @@ export default function TransactionTerminal({
               aria-expanded={expanded}
               className="flex w-full items-center gap-2 px-4 py-3 text-left"
             >
-              <TerminalSquare className="h-4 w-4 shrink-0 text-emerald-300" />
+              <Receipt className="h-4 w-4 shrink-0 text-emerald-300" />
               <span className="font-mono text-xs font-semibold tracking-wide text-slate-200">
-                TX TERMINAL
+                TRANSACTION RECEIPT
               </span>
 
               {/* Network / Fork status indicator (live mainnet vs local fork) */}
@@ -344,60 +390,155 @@ export default function TransactionTerminal({
                   transition={{ duration: 0.25, ease: "easeInOut" }}
                   className="max-h-[82vh] overflow-y-auto overscroll-contain"
                 >
-                  <div className="space-y-1.5 border-t border-white/10 px-4 py-3 font-mono text-[11px] leading-relaxed">
-                    <LogLine
-                      name="execution_id"
-                      value={execId}
-                      copyable
-                      copied={copiedKey === "execution_id"}
-                      onCopy={() => copy("execution_id", execId)}
-                    />
-                    <LogLine
-                      name="swapvm_router"
-                      value={tx.to}
-                      copyable
-                      copied={copiedKey === "swapvm_router"}
-                      onCopy={() => copy("swapvm_router", tx.to)}
-                    />
-                    <LogLine
-                      name="atomic_batch"
-                      value="executeAtomic([aqua-swap: USDC→ETH, lido-submit: ETH→stETH])"
-                    />
-                    <LogLine
-                      name="gas_estimate"
-                      value={`${Number(tx.estimatedGas).toLocaleString("en-US")} units`}
-                    />
-                    {saved && (
-                      <LogLine
-                        name="gas_saved"
-                        tone="accent"
-                        value={`~${saved.abs} gas (${saved.pct}) · Aqua SwapVM batches swap + stake, no separate approval tx`}
+                  <div className="space-y-3 border-t border-white/10 px-4 py-3">
+                    {/* Off-chain compiled badge — makes it unmistakable that
+                        nothing has moved on-chain yet. */}
+                    <div className="relative inline-flex">
+                      <button
+                        type="button"
+                        onClick={() => setShowInfo((v) => !v)}
+                        aria-expanded={showInfo}
+                        title="Funds haven't moved yet — this batch is compiled and waits for your wallet to confirm and broadcast it on-chain."
+                        className="inline-flex items-center gap-1.5 rounded-full border border-sky-400/30 bg-sky-500/10 px-3 py-1 text-[11px] font-semibold text-sky-300 transition hover:bg-sky-500/20"
+                      >
+                        <Info className="h-3 w-3" />
+                        Off-Chain Compiled
+                      </button>
+
+                      <AnimatePresence>
+                        {showInfo && (
+                          <motion.div
+                            key="offchain-info"
+                            initial={{ opacity: 0, y: -4 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -4 }}
+                            transition={{ duration: 0.15 }}
+                            className="absolute left-0 top-full z-10 mt-2 w-64 rounded-lg border border-white/10 bg-slate-900/95 p-2.5 text-[11px] leading-snug text-slate-300 shadow-xl"
+                          >
+                            Funds haven&rsquo;t moved yet. This batch is
+                            compiled and sits ready — nothing broadcasts
+                            on-chain until you confirm it in your wallet.
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
+
+                    {/* User Receipt — the primary, human-readable view. */}
+                    <div className="divide-y divide-white/5 rounded-xl border border-white/10 bg-white/5 px-3">
+                      <ReceiptRow
+                        label="You Swapped"
+                        value={`${usdcIn} USDC`}
                       />
-                    )}
-                    <LogLine
-                      name="net_balance"
-                      tone="accent"
-                      value={`-${usdcIn} USDC  ➔  +${stethOut} ${yieldToken}`}
-                    />
-                    <LogLine
-                      name="projected_apy"
-                      value={`${apy} (${protocol})`}
-                    />
-                    <LogLine
-                      name="wallet"
-                      value={`${wallet.address}  (${wallet.source}${wallet.isDemo ? " · demo" : ""})`}
-                      copyable
-                      copied={copiedKey === "wallet"}
-                      onCopy={() => copy("wallet", wallet.address)}
-                    />
-                    <LogLine
-                      name="network"
-                      tone={network.live ? "accent" : undefined}
-                      value={network.label}
-                    />
-                    {warnings.map((w, i) => (
-                      <LogLine key={i} name="warn" tone="warn" value={w} />
-                    ))}
+                      <ReceiptRow
+                        label="You Earn"
+                        tone="accent"
+                        value={`~${stethOut} ${yieldToken} (${apy} APY via ${protocolShort})`}
+                      />
+                      <ReceiptRow
+                        label="Gas Saved"
+                        tone="accent"
+                        value={
+                          saved
+                            ? `~${saved.abs} units (${saved.pct} faster & cheaper via 1inch Aqua)`
+                            : "—"
+                        }
+                      />
+                      <ReceiptRow
+                        label="Action Status"
+                        value="Batch Ready for Wallet Broadcast"
+                      />
+                    </div>
+
+                    {/* Toggle: raw SwapVM trace, for hackathon judges. */}
+                    <button
+                      type="button"
+                      onClick={() => setShowTrace((v) => !v)}
+                      aria-expanded={showTrace}
+                      className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-3 py-2 font-mono text-[11px] font-semibold text-slate-300 transition hover:bg-white/10"
+                    >
+                      <Settings className="h-3.5 w-3.5" />
+                      {showTrace
+                        ? "Hide SwapVM Developer Trace"
+                        : "Show SwapVM Developer Trace"}
+                    </button>
+
+                    <AnimatePresence initial={false}>
+                      {showTrace && (
+                        <motion.div
+                          key="dev-trace"
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: "auto", opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
+                          transition={{ duration: 0.2, ease: "easeInOut" }}
+                          className="overflow-hidden"
+                        >
+                          <div className="space-y-1.5 border-t border-white/10 pt-3 font-mono text-[11px] leading-relaxed">
+                            <LogLine
+                              name="execution_id"
+                              value={execId}
+                              copyable
+                              copied={copiedKey === "execution_id"}
+                              onCopy={() => copy("execution_id", execId)}
+                            />
+                            <LogLine
+                              name="swapvm_router"
+                              value={tx.to}
+                              copyable
+                              copied={copiedKey === "swapvm_router"}
+                              onCopy={() => copy("swapvm_router", tx.to)}
+                            />
+                            <LogLine
+                              name="atomic_batch"
+                              value="executeAtomic([aqua-swap: USDC→ETH, lido-submit: ETH→stETH])"
+                            />
+                            <LogLine
+                              name="gas_estimate"
+                              value={`${Number(tx.estimatedGas).toLocaleString(
+                                "en-US"
+                              )} units`}
+                            />
+                            {saved && (
+                              <LogLine
+                                name="gas_saved"
+                                tone="accent"
+                                value={`~${saved.abs} gas (${saved.pct}) · Aqua SwapVM batches swap + stake, no separate approval tx`}
+                              />
+                            )}
+                            <LogLine
+                              name="net_balance"
+                              tone="accent"
+                              value={`-${usdcIn} USDC  ➔  +${stethOut} ${yieldToken}`}
+                            />
+                            <LogLine
+                              name="projected_apy"
+                              value={`${apy} (${protocol})`}
+                            />
+                            <LogLine
+                              name="wallet"
+                              value={`${wallet.address}  (${wallet.source}${
+                                wallet.isDemo ? " · demo" : ""
+                              })`}
+                              copyable
+                              copied={copiedKey === "wallet"}
+                              onCopy={() => copy("wallet", wallet.address)}
+                            />
+                            <LogLine
+                              name="network"
+                              tone={network.live ? "accent" : undefined}
+                              value={network.label}
+                            />
+                            {warnings.map((w, i) => (
+                              <LogLine
+                                key={i}
+                                name="warn"
+                                tone="warn"
+                                value={w}
+                              />
+                            ))}
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
                   </div>
 
                   <div className="flex items-center justify-between border-t border-white/10 px-4 py-2">

@@ -38,48 +38,65 @@ export default function Home() {
       <BackgroundEffects symbol={activeSymbol} />
 
       <div className="relative z-10 flex flex-1 flex-col items-center gap-6 px-6 py-10 text-center">
-        <div className="glass-panel flex max-w-sm flex-col gap-3 rounded-3xl px-6 py-8">
-          <h2 className="text-2xl font-bold text-slate-50">SwipeFi</h2>
-          <p className="text-sm text-slate-400">
-            Zap your USDC into stETH yield with a single swipe, powered by 1inch
-            Aqua SwapVM.
-          </p>
+        {/* Sticky header: pinned above the deck so dragged/exiting cards never
+            render on top of the brand + wallet status while scrolling. */}
+        <div className="sticky top-0 z-30 -mx-6 flex w-[calc(100%+3rem)] flex-col items-center gap-6 border-b border-slate-800/50 bg-slate-950/80 px-6 pb-6 pt-2 backdrop-blur-md">
+          <div className="glass-panel flex max-w-sm flex-col gap-3 rounded-3xl px-6 py-8">
+            <h2 className="text-2xl font-bold text-slate-50">
+              Swipe Into Yield
+            </h2>
+            <p className="text-sm text-slate-400">
+              Zap stablecoins into yield protocols in 1 swipe — powered by 1inch
+              Aqua SwapVM.
+            </p>
+          </div>
+
+          {/* Wallet status — subtle demo badge until a real wallet is attached;
+              prefixed with the Telegram @username when opened inside Telegram. */}
+          <span
+            className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 font-mono text-[11px] font-medium ${
+              wallet.isDemo
+                ? "border-amber-400/25 bg-amber-500/10 text-amber-200/90"
+                : "border-emerald-400/25 bg-emerald-500/10 text-emerald-200/90"
+            }`}
+          >
+            <span
+              className={`h-1.5 w-1.5 rounded-full ${
+                wallet.isDemo ? "bg-amber-400" : "bg-emerald-400"
+              }`}
+            />
+            {wallet.telegramUser ? `${wallet.telegramUser} · ` : ""}
+            {wallet.isDemo
+              ? `Demo Wallet Active · ${shortAddress(wallet.address)}`
+              : `Wallet connected · ${shortAddress(wallet.address)}`}
+          </span>
         </div>
 
-        {/* Wallet status — subtle demo badge until a real wallet is attached;
-            prefixed with the Telegram @username when opened inside Telegram. */}
-        <span
-          className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 font-mono text-[11px] font-medium ${
-            wallet.isDemo
-              ? "border-amber-400/25 bg-amber-500/10 text-amber-200/90"
-              : "border-emerald-400/25 bg-emerald-500/10 text-emerald-200/90"
-          }`}
-        >
-          <span
-            className={`h-1.5 w-1.5 rounded-full ${
-              wallet.isDemo ? "bg-amber-400" : "bg-emerald-400"
-            }`}
-          />
-          {wallet.telegramUser ? `${wallet.telegramUser} · ` : ""}
-          {wallet.isDemo
-            ? `Demo Wallet Active · ${shortAddress(wallet.address)}`
-            : `Wallet connected · ${shortAddress(wallet.address)}`}
-        </span>
+        {/* Card deck sits strictly below the sticky header's stacking
+            context — isolate keeps its own z-index scale from ever competing
+            with the header's, overflow-hidden clips any stray drag/exit
+            transform at this section's own bounds. */}
+        <div className="relative z-10 isolate w-full flex-1 overflow-hidden">
+          {/* Any unexpected Web3 / execution throw inside the deck or terminal is
+              caught here instead of crashing the Telegram webview. */}
+          <ErrorBoundary onRetry={() => setZap(null)}>
+            <div className="flex flex-col items-center gap-6">
+              <CardDeck
+                onZap={handleZap}
+                onActiveTokenChange={setActiveSymbol}
+              />
 
-        {/* Any unexpected Web3 / execution throw inside the deck or terminal is
-            caught here instead of crashing the Telegram webview. */}
-        <ErrorBoundary onRetry={() => setZap(null)}>
-          <CardDeck onZap={handleZap} onActiveTokenChange={setActiveSymbol} />
-
-          <TransactionTerminal
-            result={zap}
-            onClose={() => setZap(null)}
-            onExpandedChange={(open) => {
-              // Terminal and toast never share the screen.
-              if (open) setToastOpen(false);
-            }}
-          />
-        </ErrorBoundary>
+              <TransactionTerminal
+                result={zap}
+                onClose={() => setZap(null)}
+                onExpandedChange={(open) => {
+                  // Terminal and toast never share the screen.
+                  if (open) setToastOpen(false);
+                }}
+              />
+            </div>
+          </ErrorBoundary>
+        </div>
 
         <TransactionToast
           open={toastOpen}
