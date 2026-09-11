@@ -1,12 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import CardDeck, { type ZapResult } from "@/components/CardDeck";
 import TransactionToast from "@/components/TransactionToast";
 import TransactionTerminal from "@/components/TransactionTerminal";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import BackgroundEffects from "@/components/BackgroundEffects";
+import LoadingScreen from "@/components/LoadingScreen";
 import { useActiveWallet } from "@/hooks/useSwapPosition";
+
+/** Splash stays up at least this long so it never flickers on fast networks. */
+const MIN_SPLASH_MS = 1_000;
 
 /** "0xabc…1234" */
 function shortAddress(address: string): string {
@@ -16,6 +20,11 @@ function shortAddress(address: string): string {
 }
 
 export default function Home() {
+  // Splash overlay. Stays true for at least MIN_SPLASH_MS so the deck never
+  // pops in mid-hydration; window.Telegram?.WebApp?.ready() dismisses
+  // Telegram's own native loading indicator in parallel.
+  const [isLoading, setIsLoading] = useState(true);
+
   // Última posición Zap & Yield compilada. Alimenta el terminal (persistente
   // hasta que el usuario lo cierra) y el toast (transitorio, se auto-descarta).
   const [zap, setZap] = useState<ZapResult | null>(null);
@@ -27,6 +36,13 @@ export default function Home() {
   // Símbolo de la card de arriba — tiñe el glow ambiental del fondo.
   const [activeSymbol, setActiveSymbol] = useState<string | null>("ETH");
 
+  useEffect(() => {
+    window.Telegram?.WebApp?.ready();
+
+    const timer = window.setTimeout(() => setIsLoading(false), MIN_SPLASH_MS);
+    return () => window.clearTimeout(timer);
+  }, []);
+
   function handleZap(result: ZapResult) {
     setZap(result);
     setToastOpen(true);
@@ -34,6 +50,8 @@ export default function Home() {
 
   return (
     <>
+      <LoadingScreen visible={isLoading} />
+
       {/* Decorative ambient atmosphere — behind every UI element, no logic. */}
       <BackgroundEffects symbol={activeSymbol} />
 
