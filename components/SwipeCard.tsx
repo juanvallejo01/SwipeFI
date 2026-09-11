@@ -224,9 +224,25 @@ export default function SwipeCard({
   return (
     <motion.div
       className="glass-panel absolute inset-0 flex flex-col justify-between rounded-3xl border-white/10 p-6"
-      style={{ x, rotate, zIndex: 10 - stackOffset }}
+      style={{
+        x,
+        rotate,
+        zIndex: 10 - stackOffset,
+        willChange: "transform",
+        // deja que el navegador maneje el scroll vertical nativo y solo
+        // intercepte el gesto horizontal — sin esto, en touch (Telegram
+        // webview incluido) el drag compite con el scroll de la pagina y
+        // se siente entrecortado
+        touchAction: active ? "pan-y" : undefined,
+        cursor: active && !isExiting ? "grab" : undefined,
+      }}
       drag={active && !isExiting ? "x" : false}
       dragConstraints={{ left: 0, right: 0 }}
+      // resorte de regreso al centro alineado con el resto de las
+      // transiciones de la card (300/30) — el default de Framer (500/10)
+      // es mucho mas rebotón y se siente inconsistente con el resto
+      dragTransition={{ bounceStiffness: 300, bounceDamping: 30 }}
+      whileTap={active && !isExiting ? { cursor: "grabbing" } : undefined}
       onDragEnd={handleDragEnd}
       animate={
         isExiting
