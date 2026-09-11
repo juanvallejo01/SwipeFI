@@ -38,15 +38,15 @@ export default function LoadingScreen({ visible }: LoadingScreenProps) {
         >
           {/* Ambient pulsing glow behind the spinner */}
           <div className="relative flex h-40 w-40 items-center justify-center">
-            <motion.span
+            <motion.div
               aria-hidden
-              className="absolute h-40 w-40 rounded-full bg-cyan-500/20 blur-2xl"
+              className="absolute h-40 w-40 shrink-0 rounded-full bg-cyan-500/20 blur-2xl"
               animate={{ scale: [1, 1.15, 1], opacity: [0.5, 0.9, 0.5] }}
               transition={{ duration: 2.2, repeat: Infinity, ease: "easeInOut" }}
             />
-            <motion.span
+            <motion.div
               aria-hidden
-              className="h-12 w-12 rounded-full border-2 border-slate-700 border-t-cyan-400"
+              className="h-12 w-12 shrink-0 rounded-full border-2 border-slate-700 border-t-cyan-400"
               animate={{ rotate: 360 }}
               transition={{ duration: 0.9, repeat: Infinity, ease: "linear" }}
             />
