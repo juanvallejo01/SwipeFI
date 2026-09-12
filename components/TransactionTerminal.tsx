@@ -23,16 +23,21 @@
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { AnimatePresence, motion } from "framer-motion";
+import { useSendTransaction } from "@privy-io/react-auth";
 import {
   Check,
   ChevronDown,
   Copy,
+  ExternalLink,
   Info,
+  Loader2,
   Receipt,
   Settings,
 } from "lucide-react";
 import type { ZapResult } from "@/components/CardDeck";
 import { DEFAULT_ZAP_AMOUNT, useActiveWallet } from "@/hooks/useSwapPosition";
+import { PRIVY_APP_ID } from "@/app/providers";
+import usePrivyEmbeddedWallet from "@/hooks/usePrivyEmbeddedWallet";
 
 interface TransactionTerminalProps {
   /** Latest compiled SwapVM batch, or `null` to keep the drawer off-screen. */
@@ -222,6 +227,136 @@ function LogLine({
             <Copy className="h-3 w-3" />
           )}
         </button>
+      )}
+    </div>
+  );
+}
+
+type BroadcastStatus = "idle" | "sending" | "success" | "error";
+
+interface BroadcastPanelProps {
+  tx: SwapPositionTxLike;
+  network: NetworkInfo;
+  /** Deterministic off-chain id, reused as the displayed hash when a real
+   *  broadcast can't reach the local fork (see the catch branch below). */
+  fallbackId: string;
+}
+
+interface SwapPositionTxLike {
+  to: string;
+  data: string;
+  value: string;
+}
+
+/**
+ * Real signing + broadcast via Privy's embedded wallet — only mounted when
+ * `PRIVY_APP_ID` is configured (see the render below), so it is guaranteed to
+ * sit inside `<PrivyProvider>` and these hooks never throw for a missing
+ * provider.
+ *
+ * The local Hardhat fork (chain 31337) lives at 127.0.0.1 and generally isn't
+ * reachable from Privy's embedded-wallet signer once the app is hosted (e.g.
+ * inside Telegram) — so a failed broadcast while `!network.live` falls back to
+ * the deterministic `fallbackId` as a labeled "simulated" hash instead of
+ * dead-ending the demo.
+ */
+function BroadcastPanel({ tx, network, fallbackId }: BroadcastPanelProps) {
+  const { ready, authenticated, address, login } = usePrivyEmbeddedWallet();
+  const { sendTransaction } = useSendTransaction();
+  const [status, setStatus] = useState<BroadcastStatus>("idle");
+  const [hash, setHash] = useState<string | null>(null);
+  const [simulated, setSimulated] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  async function handleSend() {
+    setStatus("sending");
+    setErrorMsg(null);
+    try {
+      const { hash: sentHash } = await sendTransaction({
+        to: tx.to,
+        data: tx.data,
+        value: BigInt(tx.value || "0"),
+        chainId: network.live ? 1 : 31337,
+      });
+      setHash(sentHash);
+      setSimulated(false);
+      setStatus("success");
+    } catch (err) {
+      if (!network.live) {
+        setHash(fallbackId);
+        setSimulated(true);
+        setStatus("success");
+        return;
+      }
+      setErrorMsg(err instanceof Error ? err.message : "Transaction failed");
+      setStatus("error");
+    }
+  }
+
+  if (!ready) {
+    return (
+      <div className="flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-[11px] font-semibold text-slate-400">
+        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        Initializing wallet…
+      </div>
+    );
+  }
+
+  if (!authenticated || !address) {
+    return (
+      <button
+        type="button"
+        onClick={login}
+        className="flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-3 py-2.5 text-[12px] font-semibold text-emerald-200 transition hover:bg-emerald-500/20"
+      >
+        Connect Wallet to Sign
+      </button>
+    );
+  }
+
+  if (status === "success" && hash) {
+    const explorerHref =
+      !simulated && network.live ? `https://etherscan.io/tx/${hash}` : null;
+
+    return (
+      <div className="space-y-1.5 rounded-xl border border-emerald-400/20 bg-emerald-500/5 px-3 py-2.5">
+        <div className="flex items-center justify-between gap-2 text-[11px] font-semibold text-emerald-300">
+          <span>
+            {simulated ? "Simulated Fork Broadcast" : "Broadcasted On-Chain"}
+          </span>
+          <Check className="h-3.5 w-3.5" />
+        </div>
+        <div className="flex items-center gap-1.5 font-mono text-[11px] text-slate-300">
+          <span className="min-w-0 flex-1 truncate">{hash}</span>
+          {explorerHref && (
+            <a
+              href={explorerHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="View on block explorer"
+              className="shrink-0 text-slate-500 transition hover:text-emerald-300"
+            >
+              <ExternalLink className="h-3.5 w-3.5" />
+            </a>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-1.5">
+      <button
+        type="button"
+        onClick={handleSend}
+        disabled={status === "sending"}
+        className="flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-3 py-2.5 text-[12px] font-semibold text-emerald-200 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        {status === "sending" && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+        {status === "sending" ? "Broadcasting…" : "Sign & Broadcast Transaction"}
+      </button>
+      {status === "error" && errorMsg && (
+        <p className="text-[11px] text-amber-300">{errorMsg}</p>
       )}
     </div>
   );
@@ -448,6 +583,18 @@ export default function TransactionTerminal({
                         value="Batch Ready for Wallet Broadcast"
                       />
                     </div>
+
+                    {/* Real signing/broadcast via Privy's embedded wallet.
+                        Skipped entirely (no throw) when NEXT_PUBLIC_PRIVY_APP_ID
+                        isn't configured — the receipt above already communicates
+                        the compiled-but-unbroadcast state in that case. */}
+                    {PRIVY_APP_ID && (
+                      <BroadcastPanel
+                        tx={tx}
+                        network={network}
+                        fallbackId={execId}
+                      />
+                    )}
 
                     {/* Toggle: raw SwapVM trace, for hackathon judges. */}
                     <button

@@ -13,7 +13,10 @@ import { TrendingDown, TrendingUp } from "lucide-react";
 import type { Token } from "@/components/CardDeck";
 
 // mas alla de estos px en X, el swipe cuenta como decision (skip / zap)
-const SWIPE_THRESHOLD = 150;
+const SWIPE_THRESHOLD = 120;
+// un flick rapido cuenta como swipe aunque no llegue al umbral de distancia
+// — info.velocity esta en px/ms, asi que 0.5 equivale a ~500px/s
+const SWIPE_VELOCITY_THRESHOLD = 0.5;
 // que tan lejos vuela la card fuera de pantalla al ser descartada
 const EXIT_DISTANCE = 500;
 
@@ -200,13 +203,23 @@ export default function SwipeCard({
     _event: MouseEvent | TouchEvent | PointerEvent,
     info: PanInfo
   ) {
-    const passedThreshold = Math.abs(info.offset.x) > SWIPE_THRESHOLD;
+    // Distancia arrastrada O velocidad del flick — en touch un swipe rapido
+    // suele recorrer menos distancia que uno lento, y sin esto se sentia
+    // como que la card "no respondia" a gestos rapidos en el celular.
+    const passedThreshold =
+      Math.abs(info.offset.x) > SWIPE_THRESHOLD ||
+      Math.abs(info.velocity.x) > SWIPE_VELOCITY_THRESHOLD;
     if (!passedThreshold) {
       // no llego al umbral: dragConstraints la regresa sola al centro con spring
       return;
     }
 
-    const direction = info.offset.x > 0 ? "right" : "left";
+    // Un flick corto puede terminar con offset ~0 — cae al signo de la
+    // velocidad para no confundir la direccion en ese caso.
+    const direction =
+      (info.offset.x !== 0 ? info.offset.x : info.velocity.x) > 0
+        ? "right"
+        : "left";
     setIsExiting(true);
 
     // saca la card volando de la pantalla con fisica de resorte antes de avisar al padre
@@ -238,6 +251,11 @@ export default function SwipeCard({
       }}
       drag={active && !isExiting ? "x" : false}
       dragConstraints={{ left: 0, right: 0 }}
+      // dragConstraints colapsa a un solo punto, asi que TODO el arrastre
+      // cae en la zona "elastica" — con el default (0.5) la card se movia a
+      // la mitad de la velocidad del dedo y se sentia pesada/entrecortada en
+      // touch. dragElastic={1} hace que siga el dedo 1:1.
+      dragElastic={1}
       // resorte de regreso al centro alineado con el resto de las
       // transiciones de la card (300/30) — el default de Framer (500/10)
       // es mucho mas rebotón y se siente inconsistente con el resto

@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import WelcomeHeader from "@/components/telegram/WelcomeHeader";
+import Providers from "./providers";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -29,8 +30,10 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col bg-slate-950 text-slate-50">
-        <WelcomeHeader />
-        <main className="flex flex-1 flex-col">{children}</main>
+        <Providers>
+          <WelcomeHeader />
+          <main className="flex flex-1 flex-col">{children}</main>
+        </Providers>
       </body>
     </html>
   );

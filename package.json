@@ -12,6 +12,8 @@
   },
   "dependencies": {
     "@1inch/aqua-sdk": "^0.3.1",
+    "@privy-io/react-auth": "^3.42.0",
+    "@stripe/stripe-js": "^9.16.0",
     "@twa-dev/sdk": "^8.0.2",
     "ethers": "^6.17.0",
     "framer-motion": "^13.2.0",

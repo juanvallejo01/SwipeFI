@@ -126,6 +126,15 @@ export default function CardDeck({
     onActiveTokenChange?.(activeSymbol);
   }, [activeSymbol, onActiveTokenChange]);
 
+  // Un error de red transitorio (comun en el webview de Telegram) no debe
+  // quedar pegado en pantalla: se auto-descarta si el usuario ya siguio de
+  // largo, igual que el toast de resultado.
+  useEffect(() => {
+    if (!swap.error) return;
+    const timer = window.setTimeout(() => swap.reset(), 5000);
+    return () => window.clearTimeout(timer);
+  }, [swap.error, swap.reset]);
+
   async function handleSwipeRight(token: Token) {
     console.log(`Initiating 1inch SwapVM position for ${token.symbol}`);
     // La card ya salio volando: avanzamos la pila y compilamos en paralelo.
@@ -208,69 +217,55 @@ export default function CardDeck({
               token={token}
               active={stackOffset === 0}
               stackOffset={stackOffset}
-              isCompiling={stackOffset === 0 && swap.isLoading}
               onSwipeComplete={handleSwipeComplete}
             />
           ))
         )}
 
+        {/* Compiling / error status for the swipe that just happened — a
+            small pinned banner, NOT a full-card overlay. The previous full
+            `inset-0` panel had no `pointer-events-none`, so it sat on top of
+            the NEW active card and ate every tap/drag until the request
+            settled: on a slow mobile connection (or a flaky one, as in
+            Telegram's in-app browser) that made the whole deck feel frozen.
+            The new top card must stay swipeable immediately, regardless of
+            how long the previous swap takes to compile in the background. */}
         <AnimatePresence>
           {swap.isLoading && (
             <motion.div
               key="zap-compiling"
-              initial={{ opacity: 0, scale: 0.96 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.96 }}
-              className="glass-panel absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 rounded-3xl border-emerald-400/30 text-center"
+              initial={{ opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              className="pointer-events-none absolute inset-x-0 top-3 z-20 flex justify-center px-4"
             >
-              {/* halo verde que respira mientras se compila el batch */}
-              <motion.span
-                aria-hidden
-                className="pointer-events-none absolute inset-0 rounded-3xl"
-                animate={{
-                  boxShadow: [
-                    "0 0 0px 0px rgba(16,185,129,0)",
-                    "0 0 34px 6px rgba(16,185,129,0.45)",
-                    "0 0 0px 0px rgba(16,185,129,0)",
-                  ],
-                }}
-                transition={{
-                  duration: 1.6,
-                  repeat: Infinity,
-                  ease: "easeInOut",
-                }}
-              />
-              <Loader2 className="h-7 w-7 animate-spin text-emerald-300" />
-              <p className="text-sm font-semibold text-emerald-200">
-                Compiling SwapVM batch…
-              </p>
-              <p className="text-xs text-slate-400">
-                1inch Aqua swap &rarr; Lido stake
-              </p>
+              <span className="glass-panel inline-flex max-w-full items-center gap-2 rounded-full border-emerald-400/30 px-4 py-2 text-xs font-semibold text-emerald-200 shadow-lg shadow-black/20">
+                <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
+                <span className="truncate">Compiling SwapVM batch…</span>
+              </span>
             </motion.div>
           )}
 
           {swap.error && (
             <motion.div
               key="zap-error"
-              initial={{ opacity: 0, scale: 0.96 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.96 }}
-              className="glass-panel absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 rounded-3xl border-red-400/30 px-6 text-center"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 8 }}
+              className="pointer-events-none absolute inset-x-2 bottom-3 z-20 flex justify-center"
             >
-              <p className="text-sm font-semibold text-red-300">
-                Couldn&rsquo;t compile the swap
-              </p>
-              <p className="max-w-full break-words text-xs text-slate-400">
-                {swap.error}
-              </p>
-              <button
-                type="button"
-                onClick={() => swap.reset()}
-                className="mt-1 rounded-full border border-white/15 bg-white/5 px-4 py-1.5 text-xs font-semibold text-slate-200 transition hover:bg-white/10"
-              >
-                Dismiss
-              </button>
+              <div className="glass-panel pointer-events-auto flex max-w-full items-center gap-3 rounded-2xl border-red-400/30 px-4 py-2.5">
+                <p className="min-w-0 flex-1 break-words text-xs text-red-300">
+                  {swap.error}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => swap.reset()}
+                  className="shrink-0 rounded-full border border-white/15 bg-white/5 px-3 py-1 text-[11px] font-semibold text-slate-200 transition hover:bg-white/10"
+                >
+                  Dismiss
+                </button>
+              </div>
             </motion.div>
           )}
         </AnimatePresence>
