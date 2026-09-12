@@ -12,11 +12,16 @@ import {
 import { TrendingDown, TrendingUp } from "lucide-react";
 import type { Token } from "@/components/CardDeck";
 
-// mas alla de estos px en X, el swipe cuenta como decision (skip / zap)
-const SWIPE_THRESHOLD = 120;
-// un flick rapido cuenta como swipe aunque no llegue al umbral de distancia
-// — info.velocity esta en px/ms, asi que 0.5 equivale a ~500px/s
-const SWIPE_VELOCITY_THRESHOLD = 0.5;
+// mas alla de estos px en X, un drag lento y deliberado cuenta como decision
+const SWIPE_THRESHOLD = 160;
+// un flick rapido cuenta como swipe con menos distancia, PERO solo si ya se
+// movio al menos esto — sin este piso, el temblor natural del dedo al
+// mantener presionado (velocidad instantanea alta, offset casi 0) se leia
+// como un swipe accidental y la card se disparaba con solo tocarla.
+const SWIPE_FLICK_MIN_OFFSET = 50;
+// info.velocity esta en px/ms, asi que 0.8 equivale a ~800px/s (flick real,
+// no el ruido de un toque sostenido)
+const SWIPE_VELOCITY_THRESHOLD = 0.8;
 // que tan lejos vuela la card fuera de pantalla al ser descartada
 const EXIT_DISTANCE = 500;
 
@@ -203,12 +208,15 @@ export default function SwipeCard({
     _event: MouseEvent | TouchEvent | PointerEvent,
     info: PanInfo
   ) {
-    // Distancia arrastrada O velocidad del flick — en touch un swipe rapido
-    // suele recorrer menos distancia que uno lento, y sin esto se sentia
-    // como que la card "no respondia" a gestos rapidos en el celular.
+    const offset = Math.abs(info.offset.x);
+    // Un drag lento y deliberado que pasa el umbral completo SIEMPRE cuenta;
+    // un flick rapido cuenta con menos distancia, pero nunca por debajo del
+    // piso minimo — asi sostener/tocar la card sin intencion de soltarla no
+    // se confunde con una decision.
     const passedThreshold =
-      Math.abs(info.offset.x) > SWIPE_THRESHOLD ||
-      Math.abs(info.velocity.x) > SWIPE_VELOCITY_THRESHOLD;
+      offset > SWIPE_THRESHOLD ||
+      (offset > SWIPE_FLICK_MIN_OFFSET &&
+        Math.abs(info.velocity.x) > SWIPE_VELOCITY_THRESHOLD);
     if (!passedThreshold) {
       // no llego al umbral: dragConstraints la regresa sola al centro con spring
       return;

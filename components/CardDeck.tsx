@@ -2,13 +2,15 @@
 
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Loader2, RotateCcw } from "lucide-react";
+import { Loader2, RotateCcw, Wallet } from "lucide-react";
 import SwipeCard from "@/components/SwipeCard";
 import {
   useSwapPosition,
   WETH_ADDRESS,
   type SwapPositionResult,
 } from "@/hooks/useSwapPosition";
+import { PRIVY_APP_ID } from "@/app/providers";
+import usePrivyEmbeddedWallet from "@/hooks/usePrivyEmbeddedWallet";
 
 export interface Token {
   /** Asset the USDC gets zapped into. */
@@ -111,6 +113,45 @@ const STRATEGIES: Token[] = [
 
 // cuantas cards de la pila se muestran detras de la que esta activa
 const VISIBLE_STACK_SIZE = 3;
+
+/**
+ * Bloquea el mazo hasta que haya una wallet embebida conectada — sin esto se
+ * podia deslizar (y "aceptar" una posicion) antes de tener con que firmarla.
+ * Solo se monta cuando `PRIVY_APP_ID` esta configurado (ver el render mas
+ * abajo), asi que estos hooks de Privy nunca se llaman sin `<PrivyProvider>`.
+ */
+function WalletGate() {
+  const { ready, authenticated, login } = usePrivyEmbeddedWallet();
+
+  // Todavia resolviendo la sesion de Privy: no mostrar nada para evitar un
+  // flash del gate antes de saber si el usuario ya esta autenticado.
+  if (!ready || authenticated) return null;
+
+  return (
+    <div className="glass-panel absolute inset-0 z-30 flex flex-col items-center justify-center gap-4 rounded-3xl border-white/10 px-6 text-center">
+      <span className="flex h-12 w-12 items-center justify-center rounded-2xl border border-emerald-400/25 bg-emerald-500/10">
+        <Wallet className="h-5 w-5 text-emerald-300" />
+      </span>
+      <div className="flex flex-col gap-1">
+        <p className="text-base font-semibold text-slate-100">
+          Connect Your Wallet to Invest
+        </p>
+        <p className="max-w-[22rem] text-xs text-slate-400">
+          One tap creates your wallet — then every right swipe zaps straight
+          into yield.
+        </p>
+      </div>
+      <button
+        type="button"
+        onClick={login}
+        className="inline-flex items-center gap-2 rounded-full border border-emerald-400/40 bg-emerald-500/10 px-5 py-2.5 text-sm font-semibold text-emerald-200 shadow-lg shadow-black/20 backdrop-blur-md transition hover:bg-emerald-500/20"
+      >
+        <Wallet className="h-4 w-4" />
+        Connect Wallet
+      </button>
+    </div>
+  );
+}
 
 export default function CardDeck({
   onZap,
@@ -221,6 +262,13 @@ export default function CardDeck({
             />
           ))
         )}
+
+        {/* Wallet gate — sits on top of the whole stack (z-30, no
+            pointer-events-none) until there's an embedded wallet to sign
+            with, so nothing can be swiped/"accepted" before a wallet is
+            connected. Only mounted when Privy is configured; without it the
+            deck behaves exactly as before (demo wallet, no gate). */}
+        {PRIVY_APP_ID && <WalletGate />}
 
         {/* Compiling / error status for the swipe that just happened — a
             small pinned banner, NOT a full-card overlay. The previous full
